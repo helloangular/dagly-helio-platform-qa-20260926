@@ -192,6 +192,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
@@ -445,6 +450,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
@@ -688,6 +698,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
@@ -941,6 +956,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
@@ -1184,6 +1204,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
@@ -1437,6 +1462,11 @@ jobs:
             // Missing recovery artifact causes no mutation and never a build.
             const prior = await read(api,s,artifactName(s));
             if (target && !prior) fail('artifact_missing');
+            // A rerun reads the variables again. Settings changed since this run froze
+            // them are drift, and are reported as such rather than as a record conflict.
+            const retained = await read(api,s,planName(s));
+            if (retained && frozen !== null && canonical(retained.value.plan) === canonical(plan) &&
+                canonical(retained.value.settings) !== canonical(frozen)) fail('settings_drift');
             await put(api,s,planName(s),frozen === null ? {plan} : {plan,settings:frozen});
             if (prior) return {build_required:false,artifact:validateArtifact(prior.value.artifact)};
             await put(api,s,buildIntentName(s),execution(s),true);
