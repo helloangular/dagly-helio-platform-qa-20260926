@@ -60,6 +60,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -113,10 +117,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -128,8 +146,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
@@ -318,6 +340,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -371,10 +397,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -386,8 +426,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
@@ -566,6 +610,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -619,10 +667,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -634,8 +696,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
@@ -824,6 +890,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -877,10 +947,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -892,8 +976,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
@@ -1072,6 +1160,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -1125,10 +1217,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -1140,8 +1246,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
@@ -1330,6 +1440,10 @@ jobs:
           'use strict';
           // Embedded verbatim in pinned reusable workflows by generate.py. No fetch/eval
           // of runtime code, no secret data in durable records, no force-updated refs.
+          // Records are annotated tags whose object is a blob holding the canonical JSON
+          // record (v2): GitHub refuses the job token a ref to a commit behind the default
+          // branch with different workflow files (a redeploy or rollback of an older
+          // version); a ref to a blob is never subject to that rule.
           const crypto = require('node:crypto');
           const fail = code => { throw Error('catalog_' + code); };
           function canonical(x) {
@@ -1383,10 +1497,24 @@ jobs:
             catch (e) { if (e.status === 404) return null; throw e; }
             if (ref?.object?.type !== 'tag' || !shaOK(ref.object.sha)) fail('record_ref');
             const tag = await api('GET', path(s) + '/git/tags/' + ref.object.sha);
-            if (tag.sha !== ref.object.sha || tag.object?.type !== 'commit' || typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
-            let body; try { body = JSON.parse(tag.message); } catch { fail('record_json'); }
-            if (body.schema !== 'helio_catalog_artifact_v1' || body.repository !== s.repository || body.repository_id !== s.repository_id ||
-                body.name !== name || !shaOK(body.commit) || tag.object.sha !== body.commit ||
+            if (tag.sha !== ref.object.sha || !shaOK(tag.object?.sha)) fail('record_ref');
+            // v2: the record is a blob the tag points at (no ref ever targets a commit, so the
+            // job token can write records for any pinned version). v1: the record is the
+            // message of a tag at the commit (records written before the cutover).
+            let text;
+            if (tag.object.type === 'blob') {
+              const blob = await api('GET', path(s) + '/git/blobs/' + tag.object.sha);
+              if (blob.sha !== tag.object.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string' || !(blob.size <= 100000)) fail('record_ref');
+              text = Buffer.from(blob.content, 'base64').toString('utf8');
+            } else if (tag.object.type === 'commit') {
+              if (typeof tag.message !== 'string' || Buffer.byteLength(tag.message) > 100000) fail('record_ref');
+              text = tag.message;
+            } else fail('record_ref');
+            let body; try { body = JSON.parse(text); } catch { fail('record_json'); }
+            const v2 = body.schema === 'helio_catalog_artifact_v2', v1 = body.schema === 'helio_catalog_artifact_v1';
+            if (!(v2 && tag.object.type === 'blob') && !(v1 && tag.object.type === 'commit')) fail('record_scope');
+            if (body.repository !== s.repository || body.repository_id !== s.repository_id ||
+                body.name !== name || !shaOK(body.commit) || (v1 && tag.object.sha !== body.commit) ||
                 (!otherCommit && (body.commit !== s.commit || body.workflow_path !== s.workflow_path))) fail('record_scope');
             if (!body.value || hash(body.value) !== body.digest) fail('record_digest');
             return {value: body.value, ref_sha: ref.object.sha, commit: body.commit};
@@ -1398,8 +1526,12 @@ jobs:
               if (canonical(old.value) !== canonical(value)) fail('record_conflict');
               return old;
             }
-            const body = {schema:'helio_catalog_artifact_v1',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
-            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:canonical(body),object:s.commit,type:'commit'});
+            const body = {schema:'helio_catalog_artifact_v2',repository:s.repository,repository_id:s.repository_id,workflow_path:s.workflow_path,commit:s.commit,name,value,digest:hash(value)};
+            // Blob first, then the tag, then the ref: creating the unique ref is the only
+            // step that decides ownership. The tag targets the blob, never the commit.
+            const blob = await api('POST', path(s) + '/git/blobs', {content:canonical(body),encoding:'utf-8'});
+            if (!shaOK(blob.sha)) fail('record_ref');
+            const tag = await api('POST', path(s) + '/git/tags', {tag:'helio/catalog/' + name,message:'helio catalog record ' + name,object:blob.sha,type:'blob'});
             if (!shaOK(tag.sha)) fail('record_ref');
             try { await api('POST', path(s) + '/git/refs', {ref:'refs/tags/helio/catalog/' + name,sha:tag.sha}); }
             catch (e) {
